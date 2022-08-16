@@ -1,0 +1,122 @@
+version: "3"
+
+services:
+  fess01:
+    image: ghcr.io/codelibs/fess:14.3.0
+    container_name: fess01
+    environment:
+      - "ES_HTTP_URL=http://es01:9200"
+      - "FESS_DICTIONARY_PATH=${FESS_DICTIONARY_PATH:-/usr/share/elasticsearch/config/dictionary/}"
+    ports:
+      - "8080:8080"
+    networks:
+      - esnet
+    depends_on:
+      - es01
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+    restart: unless-stopped
+
+  es01:
+    image: ghcr.io/codelibs/fess-elasticsearch:8.3.3
+    container_name: es01
+    environment:
+      - node.name=es01
+      - discovery.seed_hosts=es01
+      - cluster.initial_master_nodes=es01
+      - cluster.name=fess-es
+      - bootstrap.memory_lock=true
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms1g -Xmx1g"
+      - "FESS_DICTIONARY_PATH=/usr/share/elasticsearch/config/dictionary"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65535
+        hard: 65535
+    volumes:
+      - esdata01:/usr/share/elasticsearch/data
+      - esdictionary01:/usr/share/elasticsearch/config/dictionary
+    ports:
+      - 9200:9200
+    networks:
+      - esnet
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+    restart: unless-stopped
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.2.3
+    container_name: kibana
+    environment:
+      - "ELASTICSEARCH_HOSTS=http://es01:9200"
+    ports:
+      - 5601:5601
+    networks:
+      - esnet
+    depends_on:
+      - es01
+    restart: unless-stopped
+
+  mysql:
+    image: mysql:latest
+    container_name: mysql
+    networks:
+      - esnet
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    volumes:
+      - esmysql:/var/lib/mysql
+
+  django:
+    build:
+      context: .
+      dockerfile: ./django/dockerfile
+    container_name: django
+    networks:
+      - esnet
+    ports:
+      - 8000:8000
+    depends_on:
+      - mysql
+    restart: unless-stopped
+    #volumes:
+    #  - esdjango:/django_app
+    tty: true
+
+  reverse-proxy:
+    image: nginx:latest
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+    ports:
+      - 80:80
+    networks:
+      - esnet
+    depends_on:
+      - fess01
+      - django
+
+
+networks:
+  esnet:
+    driver: bridge
+
+volumes:
+  esdata01:
+    driver: local
+  esdictionary01:
+    driver: local
+  esmysql:
+  esdjango:
